@@ -2,77 +2,78 @@ from flask import Flask, request
 import openai
 import psycopg2
 
+openai.api_key = "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"
+
+def enviaGPT(prompt_sistema, prompt_usuario):
+    return openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {
+                "role": "system",
+                "content": prompt_sistema
+            },
+            {
+                "role": "user",
+                "content": prompt_usuario
+            }
+        ],
+        temperature=0.7,
+        max_tokens=50,
+        top_p=1,
+        frequency_penalty=0,
+        presence_penalty=0
+    )
+
+def receber_texto():
+    try:
+        with psycopg2.connect(
+                dbname="postgres",
+                user="postgres",
+                password="01thiago",
+                host="localhost"
+        ) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = %s and table_name = %s;",
+                ('public', 'dicionario_campos'))
+            resultColumns = cur.fetchall()
+            cur.execute("SELECT * FROM dicionario_campos;")
+            resultsFields = cur.fetchall()
+            dicionario = f'Estrutura: {resultColumns}  Dados: {resultsFields}'
+
+            prompt_sistema = """
+            Você é um interpretador de texto do usuário em SQL para Postgres.
+            Certifique-se que sua resposta seja possível de ser executada no Postgres.
+            Use apenas cláusulas SELECT, SUM, COUNT, JOIN e WHERE. Sem ORDER ou LIMIT ou GROUP BY.
+            Responda sempre somente com o código SQL.
+            Considere a estrutura do banco de dados: 
+            """ + str(dicionario)
+
+            prompt_usuario = request.data.decode("utf-8")
+            sql_query = enviaGPT(prompt_sistema, prompt_usuario).choices[0].message.content
+            cur.execute(sql_query)
+            results = cur.fetchall()
+
+            prompt_sistema_tratamento = (f'Você é um montador de respostas amigáveis ao usuário'
+                                         f'Você irá receber uma solicitação de um usuário e uma resposta de um assistente de forma crua '
+                                         f'Você deve retornar uma mensagem amigável ao usuário com a resposta obtida do assistente.'
+                                         f'Enviarei todo o texto que você responder diretamente ao usuário!')
+            prompt_usuário_tratamento = (f'O usuário solicitou: {prompt_usuario},'
+                                         f'O assistente obteve a resposta: {results} ')
+            retornoTratado = enviaGPT(prompt_sistema_tratamento, prompt_usuário_tratamento).choices[0].message.content
+            return f'{retornoTratado}'
+    except Exception as e:
+        return f'Erro: {str(e)}'
+
+
 app = Flask(__name__)
 
-# openai.api_key = "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"
 
-conn = psycopg2.connect(
-    dbname="postgres",
-    user="postgres",
-    password="01thiago",
-    host="localhost"
-)
+@app.route('/receber_texto', methods=['POST'])
+def receber_texto_route():
+    return receber_texto()
 
-cur = conn.cursor()
-def getDatabaseDictionary():
-    cur_columnNames = conn.cursor()
-    cur_columnNames.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' and table_name ='dicionario_campos';")
-    resultColumns = cur_columnNames.fetchall()
 
-    cur = conn.cursor()
-    cur.execute("select * from dicionario_campos")
-    resultsFields = cur.fetchall()
+if __name__ == '__main__':
+    app.run(debug=True)
 
-    return f'Estrutura: {resultColumns}  Dados: {resultsFields}'
 
-prompt_sistema = """
-Você é um interpetador de texto do usuário em SQL para Postgres. Responda sempre somente com o código SQL.
-Considere a estrutura do banco de dados: 
-""" + getDatabaseDictionary()
-
-print(getDatabaseDictionary())
-#
-# @app.route('/receber_texto', methods=['POST'])
-# def receber_texto():
-#     try:
-#         prompt_usuario = request.data.decode("utf-8")
-#         resposta = openai.ChatCompletion.create(
-#             model="gpt-3.5-turbo",
-#             messages=[
-#                 {
-#                     "role": "system",
-#                     "content": prompt_sistema
-#                 },
-#                 {
-#                     "role": "user",
-#                     "content": prompt_usuario
-#                 }
-#             ],
-#             temperature=0.7,
-#             max_tokens=50,
-#             top_p=1,
-#             frequency_penalty=0,
-#             presence_penalty=0
-#         )
-#
-#         # Obtém a consulta SQL gerada
-#         sql_query = resposta.choices[0].message.content
-#
-#         # Execute a consulta SQL no banco de dados
-#         cur.execute(sql_query)
-#
-#         # Recupere os resultados da consulta
-#         results = cur.fetchall()
-#
-#         return f'Resposta do SQL: {results}'
-#     except Exception as e:
-#         return f'Erro: {str(e)}'
-#
-# if __name__ == '__main__':
-#     app.run(debug=True)
-#
-# conn.close()
-#
-#
-#
-#
